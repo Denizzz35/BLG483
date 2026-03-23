@@ -53,11 +53,11 @@ class PageParser(HTMLParser):
 
 # --- Core Crawler Job ---
 class CrawlerThread(threading.Thread):
-    def __init__(self, origin, max_depth, pps, queue_capacity):
+    def __init__(self, origin, max_depth, hit_rate, queue_capacity):
         super().__init__()
         self.origin = origin
         self.max_depth = max_depth
-        self.pps = pps
+        self.hit_rate = hit_rate
         self.queue_capacity = queue_capacity
         
         self.crawler_id = None
@@ -79,14 +79,18 @@ class CrawlerThread(threading.Thread):
         log_status("running", logs, queue)
 
         last_request_time = 0
+        urls_visited_count = 0
 
         while queue:
+            if self.max_urls > 0 and urls_visited_count >= self.max_urls:
+                logs.append(f"Reached Max URLs limit ({self.max_urls}). Stopping crawl.")
+                break
             current_url, origin_url, depth = queue.pop(0)
             log_status("running", logs, queue)
 
-            # --- Rate Limiting (Pages per second) ---
-            if self.pps > 0:
-                time_to_wait = 1.0 / self.pps
+            # --- Rate Limiting (Hit Rate) ---
+            if self.hit_rate > 0:
+                time_to_wait = 1.0 / self.hit_rate
                 elapsed = time.time() - last_request_time
                 if elapsed < time_to_wait:
                     time.sleep(time_to_wait - elapsed)
@@ -195,11 +199,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             
             origin = params.get('origin', [''])[0]
             depth = int(params.get('depth', ['1'])[0])
-            pps = float(params.get('pps', ['0'])[0])
+            hit_rate = float(params.get('hit_rate', ['0'])[0])
             queue_capacity = int(params.get('queue_capacity', ['0'])[0])
-            
+            max_urls = int(params.get('max_urls', ['0'])[0])            
             # Start the crawler thread and wait for it to assign its own ID
-            worker = CrawlerThread(origin, depth, pps, queue_capacity)
+            worker = CrawlerThread(origin, depth, hit_rate, queue_capacity, max_urls)
             worker.start()
             worker.started_event.wait() # Pauses just long enough for the ID to generate
             
