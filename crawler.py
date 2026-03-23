@@ -7,6 +7,8 @@ from html.parser import HTMLParser
 import re
 from collections import defaultdict
 import cmd
+import json
+import os
 #import time
 
 # --- Native HTML Parser ---
@@ -38,11 +40,28 @@ class PageParser(HTMLParser):
 
 # --- Core Crawler System ---
 class SearchCrawlSystem:
-    def __init__(self, max_queue_depth=5000, worker_count=20):
+    def __init__(self, max_queue_depth=5000, worker_count=20, state_file="state.json"):
         # Backpressure: Bounded queue prevents unbounded memory growth
         self.queue = asyncio.Queue(maxsize=max_queue_depth)
         self.worker_count = worker_count
+        self.state_file = state_file
         
+        if os.path.exists(self.state_file):
+            with open(self.state_file, 'r') as f:
+                data = json.load(f)
+                self.visited = set(data.get('visited', []))
+                self.url_metadata = data.get('url_metadata', {})
+                # Convert lists back to sets for the inverted index
+                self.inverted_index = defaultdict(set, {k: set(v) for k, v in data.get('inverted_index', {}).items()})
+                self.indexed_count = data.get('indexed_count', 0)
+                print(f"[*] Resumed state: {self.indexed_count} indexed pages loaded.")
+
+        else:
+            self.visited = set()
+            self.url_metadata = {} 
+            self.inverted_index = defaultdict(set) 
+            self.indexed_count = 0        
+
         # State & Index
         self.visited = set()
         self.url_metadata = {} # URL -> (origin_url, depth)
@@ -136,6 +155,19 @@ class SearchCrawlSystem:
             "backpressure_status": "HIGH" if self.queue.full() else ("MODERATE" if self.queue.qsize() > self.queue.maxsize * 0.8 else "NORMAL")
         }
 
+    def save_state(self):
+        """Serializes the current state to disk."""
+        print("\n[*] Saving system state to disk...")
+        data = {
+            'visited': list(self.visited),
+            'url_metadata': self.url_metadata,
+            # Sets are not JSON serializable, convert to lists
+            'inverted_index': {k: list(v) for k, v in self.inverted_index.items()},
+            'indexed_count': self.indexed_count
+        }
+        with open(self.state_file, 'w') as f:
+            json.dump(data, f)
+        print("[*] State saved successfully.")
 
 # --- CLI / UI ---
 class CrawlerCLI(cmd.Cmd):
@@ -189,6 +221,7 @@ class CrawlerCLI(cmd.Cmd):
     def do_quit(self, arg):
         """quit\nExit the application."""
         print("Shutting down...")
+        self.system.save_state() # <-- NEW: Save state before quitting
         self.loop.call_soon_threadsafe(self.loop.stop)
         return True
 
