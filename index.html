@@ -1,0 +1,75 @@
+        <!DOCTYPE html>
+        <html>
+        <head><title>Brightwave Crawler</title></head>
+        <body style="font-family: sans-serif; padding: 20px;">
+            <h1>Web Crawler Dashboard</h1>
+            
+            <div style="border: 1px solid #ccc; padding: 15px; margin-bottom: 20px;">
+                <h3>1. Start New Crawler</h3>
+                <form onsubmit="startCrawl(event)">
+                    URL: <input type="text" id="origin" placeholder="https://example.com" required>
+                    Depth: <input type="number" id="depth" value="1" min="0" required>
+                    <button type="submit">Start Crawl</button>
+                </form>
+                <p id="crawl-msg"></p>
+            </div>
+
+            <div style="border: 1px solid #ccc; padding: 15px; margin-bottom: 20px;">
+                <h3>2. Crawler Status (Long Polling Simulation)</h3>
+                <input type="text" id="crawlerId" placeholder="Crawler ID">
+                <button onclick="pollStatus()">Check Status</button>
+                <pre id="status-log" style="background: #f4f4f4; padding: 10px;"></pre>
+            </div>
+
+            <div style="border: 1px solid #ccc; padding: 15px;">
+                <h3>3. Search Filesystem</h3>
+                <form onsubmit="searchFiles(event)">
+                    Query: <input type="text" id="query" required>
+                    <button type="submit">Search</button>
+                </form>
+                <ul id="search-results"></ul>
+            </div>
+
+            <script>
+                async function startCrawl(e) {
+                    e.preventDefault();
+                    const origin = document.getElementById('origin').value;
+                    const depth = document.getElementById('depth').value;
+                    const res = await fetch('/api/crawl', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                        body: `origin=${encodeURIComponent(origin)}&depth=${depth}`
+                    });
+                    const data = await res.json();
+                    document.getElementById('crawl-msg').innerText = "Started! ID: " + data.crawler_id;
+                    document.getElementById('crawlerId').value = data.crawler_id;
+                }
+
+                async function pollStatus() {
+                    const id = document.getElementById('crawlerId').value;
+                    if(!id) return;
+                    const res = await fetch('/api/status?id=' + id);
+                    const data = await res.json();
+                    if(data.error) {
+                        document.getElementById('status-log').innerText = data.error;
+                    } else {
+                        document.getElementById('status-log').innerText = 
+                            "Status: " + data.status + "\\n\\nLogs:\\n" + data.logs.join('\\n');
+                    }
+                }
+
+                async function searchFiles(e) {
+                    e.preventDefault();
+                    const q = document.getElementById('query').value;
+                    const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+                    const data = await res.json();
+                    const ul = document.getElementById('search-results');
+                    ul.innerHTML = '';
+                    if(data.length === 0) ul.innerHTML = '<li>No results found on disk.</li>';
+                    data.forEach(item => {
+                        ul.innerHTML += `<li><b>${item.url}</b> (Origin: ${item.origin}, Depth: ${item.depth}, Freq: ${item.frequency})</li>`;
+                    });
+                }
+            </script>
+        </body>
+        </html>
