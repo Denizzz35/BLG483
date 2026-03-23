@@ -1,7 +1,6 @@
 import threading
 import urllib.request
-import urllib.error
-from urllib.parse import urljoin
+from urllib.parse import urljoin, parse_qs
 from html.parser import HTMLParser
 import re
 from collections import Counter
@@ -10,7 +9,6 @@ import os
 import time
 import string
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import parse_qs
 
 # --- File System Setup & Locks ---
 STORAGE_DIR = "storage"
@@ -23,7 +21,7 @@ for d in [STORAGE_DIR, JOBS_DIR]:
 if not os.path.exists(VISITED_FILE):
     open(VISITED_FILE, 'w').close()
 
-# We need locks because multiple threads might try to write to 'a.data' at the same time
+# Locks to prevent data corruption when multiple threads write to the same file
 file_locks = {char: threading.Lock() for char in string.ascii_lowercase}
 file_locks['visited'] = threading.Lock()
 
@@ -54,93 +52,119 @@ class PageParser(HTMLParser):
         return Counter(words)
 
 # --- Core Crawler Job ---
-def crawler_job(origin, max_depth, crawler_id):
-    job_file = os.path.join(JOBS_DIR, f"{crawler_id}.data")
-    
-    def log_status(status, logs, queue):
-        with open(job_file, 'w') as f:
-            json.dump({"status": status, "logs": logs, "queue": queue}, f)
+class CrawlerThread(threading.Thread):
+    def __init__(self, origin, max_depth, pps, queue_capacity):
+        super().__init__()
+        self.origin = origin
+        self.max_depth = max_depth
+        self.pps = pps
+        self.queue_capacity = queue_capacity
+        
+        self.crawler_id = None
+        self.started_event = threading.Event()
 
-    logs = [f"Started job {crawler_id} for {origin}"]
-    queue = [(origin, origin, 0)]
-    log_status("running", logs, queue)
+    def run(self):
+        # 1. Define Crawler ID exact format: [EpochTimeCreated_ThreadID]
+        self.crawler_id = f"{int(time.time())}_{self.ident}"
+        self.started_event.set() # Unblock the web server to return the ID to the UI
 
-    while queue:
-        current_url, origin_url, depth = queue.pop(0)
+        job_file = os.path.join(JOBS_DIR, f"{self.crawler_id}.data")
+        
+        def log_status(status, logs, queue):
+            with open(job_file, 'w') as f:
+                json.dump({"status": status, "logs": logs, "queue": queue}, f)
+
+        logs = [f"Started job {self.crawler_id} for {self.origin}"]
+        queue = [(self.origin, self.origin, 0)]
         log_status("running", logs, queue)
 
-        # Check and update visited URLs
-        with file_locks['visited']:
-            with open(VISITED_FILE, 'r') as f:
-                visited = set(f.read().splitlines())
-            
-            if current_url in visited:
-                continue
-                
-            with open(VISITED_FILE, 'a') as f:
-                f.write(current_url + "\n")
-            visited.add(current_url)
+        last_request_time = 0
 
-        # Fetch page
-        try:
-            req = urllib.request.Request(current_url, headers={'User-Agent': 'LocalWebCrawler/1.0'})
-            with urllib.request.urlopen(req, timeout=5) as response:
-                if response.status != 200 or 'text/html' not in response.info().get_content_type():
+        while queue:
+            current_url, origin_url, depth = queue.pop(0)
+            log_status("running", logs, queue)
+
+            # --- Rate Limiting (Pages per second) ---
+            if self.pps > 0:
+                time_to_wait = 1.0 / self.pps
+                elapsed = time.time() - last_request_time
+                if elapsed < time_to_wait:
+                    time.sleep(time_to_wait - elapsed)
+            last_request_time = time.time()
+
+            # --- Visited URLs Check ---
+            with file_locks['visited']:
+                with open(VISITED_FILE, 'r') as f:
+                    visited = set(f.read().splitlines())
+                
+                if current_url in visited:
                     continue
-                html = response.read().decode('utf-8', errors='ignore')
-        except Exception as e:
-            logs.append(f"Error fetching {current_url}: {str(e)}")
-            continue
+                    
+                with open(VISITED_FILE, 'a') as f:
+                    f.write(current_url + "\n")
+                visited.add(current_url)
 
-        # Parse content
-        parser = PageParser(current_url)
-        parser.feed(html)
-        word_freqs = parser.get_word_frequencies()
-
-        # Save words to [letter].data
-        for word, count in word_freqs.items():
-            first_letter = word[0]
-            if first_letter not in file_locks:
+            # --- Fetch HTML ---
+            try:
+                req = urllib.request.Request(current_url, headers={'User-Agent': 'BrightwaveCrawler/1.0'})
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    if response.status != 200 or 'text/html' not in response.info().get_content_type():
+                        continue
+                    html = response.read().decode('utf-8', errors='ignore')
+            except Exception as e:
+                logs.append(f"Error fetching {current_url}: {str(e)}")
                 continue
+
+            # --- Parse & Count Words ---
+            parser = PageParser(current_url)
+            parser.feed(html)
+            word_freqs = parser.get_word_frequencies()
+
+            # --- Save to [letter].data ---
+            for word, count in word_freqs.items():
+                first_letter = word[0]
+                if first_letter not in file_locks:
+                    continue
+                    
+                lock = file_locks[first_letter]
+                letter_file = os.path.join(STORAGE_DIR, f"{first_letter}.data")
                 
-            lock = file_locks[first_letter]
-            letter_file = os.path.join(STORAGE_DIR, f"{first_letter}.data")
-            
-            with lock:
-                # Load existing data
-                if os.path.exists(letter_file):
-                    try:
-                        with open(letter_file, 'r') as f:
-                            data = json.load(f)
-                    except json.JSONDecodeError:
+                with lock:
+                    if os.path.exists(letter_file):
+                        try:
+                            with open(letter_file, 'r') as f:
+                                data = json.load(f)
+                        except json.JSONDecodeError:
+                            data = {}
+                    else:
                         data = {}
-                else:
-                    data = {}
 
-                # Update data
-                if word not in data:
-                    data[word] = []
-                data[word].append({
-                    "url": current_url,
-                    "origin": origin_url,
-                    "depth": depth,
-                    "frequency": count
-                })
+                    if word not in data:
+                        data[word] = []
+                    data[word].append({
+                        "url": current_url,
+                        "origin": origin_url,
+                        "depth": depth,
+                        "frequency": count
+                    })
 
-                # Write back to disk
-                with open(letter_file, 'w') as f:
-                    json.dump(data, f)
+                    with open(letter_file, 'w') as f:
+                        json.dump(data, f)
 
-        logs.append(f"Indexed {current_url} (Depth {depth})")
+            logs.append(f"Indexed {current_url} (Depth {depth})")
 
-        # Queue new links
-        if depth < max_depth:
-            for link in parser.links:
-                if link not in visited:
-                    queue.append((link, origin_url, depth + 1))
+            # --- Queue Management & Backpressure ---
+            if depth < self.max_depth:
+                for link in parser.links:
+                    if link not in visited:
+                        # Queue Capacity Logic: Skip adding if we hit our limit
+                        if self.queue_capacity > 0 and len(queue) >= self.queue_capacity:
+                            logs.append("Queue capacity reached. Pausing link ingestion for this page.")
+                            break 
+                        queue.append((link, origin_url, depth + 1))
 
-    logs.append(f"Job {crawler_id} completed.")
-    log_status("completed", logs, [])
+        logs.append(f"Job {self.crawler_id} completed.")
+        log_status("completed", logs, [])
 
 # --- Web Server & API ---
 class RequestHandler(BaseHTTPRequestHandler):
@@ -171,28 +195,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             
             origin = params.get('origin', [''])[0]
             depth = int(params.get('depth', ['1'])[0])
+            pps = float(params.get('pps', ['0'])[0])
+            queue_capacity = int(params.get('queue_capacity', ['0'])[0])
             
-            # Create Thread ID [EpochTimeCreated_ThreadID]
-            epoch = int(time.time())
-            # Start a dummy thread just to get its future ID, or start it and read it inside
-            t = threading.Thread(target=crawler_job, args=(origin, depth, "placeholder"))
-            t.start()
-            crawler_id = f"{epoch}_{t.ident}"
+            # Start the crawler thread and wait for it to assign its own ID
+            worker = CrawlerThread(origin, depth, pps, queue_capacity)
+            worker.start()
+            worker.started_event.wait() # Pauses just long enough for the ID to generate
             
-            # We have to patch the crawler_id because thread.ident is only assigned AFTER start()
-            # To fix this cleanly, we pass the real ID via a wrapper function.
-            def thread_wrapper():
-                ident = threading.current_thread().ident
-                real_id = f"{epoch}_{ident}"
-                crawler_job(origin, depth, real_id)
-                
-            # Actually, standard threading allows grabbing ident if we create a custom Thread class, 
-            # but for simplicity, let's just use epoch_random or epoch_systemthreadid
-            crawler_id = f"{epoch}_{threading.get_native_id()}"
-            t = threading.Thread(target=crawler_job, args=(origin, depth, crawler_id))
-            t.start()
-            
-            self.send_json({"message": "Job started", "crawler_id": crawler_id})
+            self.send_json({"message": "Job started", "crawler_id": worker.crawler_id})
 
     def perform_search(self, query):
         words = re.findall(r'[a-z]+', query)

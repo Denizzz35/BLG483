@@ -1,75 +1,123 @@
-        <!DOCTYPE html>
-        <html>
-        <head><title>Brightwave Crawler</title></head>
-        <body style="font-family: sans-serif; padding: 20px;">
-            <h1>Web Crawler Dashboard</h1>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Brightwave Crawler</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; }
+        .card { background: white; border-radius: 8px; padding: 25px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; max-width: 800px; margin-left: auto; margin-right: auto; }
+        .row { display: flex; gap: 20px; margin-bottom: 15px; }
+        .col { flex: 1; }
+        label { display: block; font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #333; }
+        input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        button { background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; }
+        button:hover { background: #2563eb; }
+        h2 { margin-top: 0; display: flex; align-items: center; gap: 10px; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>🚀 Create New Crawler</h2>
+        <form onsubmit="startCrawl(event)">
+            <div class="row">
+                <div class="col" style="flex: 2;">
+                    <label>Origin URL *</label>
+                    <input type="text" id="origin" placeholder="https://www.wikipedia.org/" required>
+                </div>
+                <div class="col">
+                    <label>Max Depth *</label>
+                    <input type="number" id="depth" value="3" min="0" required>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col">
+                    <label>Hit Rate (/sec)</label>
+                    <input type="number" id="hit_rate" value="1" step="0.1" min="0">
+                </div>
+                <div class="col">
+                    <label>Queue Capacity</label>
+                    <input type="number" id="queue_capacity" value="10000" min="0">
+                </div>
+                <div class="col">
+                    <label>Max URLs to Visit</label>
+                    <input type="number" id="max_urls" value="100" min="0">
+                </div>
+            </div>
+            <button type="submit">🕷️ Start Crawler</button>
+            <span id="crawl-msg" style="margin-left: 15px; color: green; font-weight: bold;"></span>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Crawler Status</h2>
+        <div style="display: flex; gap: 10px;">
+            <input type="text" id="crawlerId" placeholder="Crawler ID (e.g. 1711234567_12345)" style="flex: 1;">
+            <button onclick="pollStatus()">Check Status</button>
+        </div>
+        <pre id="status-log" style="background: #1e1e1e; color: #10b981; padding: 15px; border-radius: 4px; max-height: 250px; overflow-y: auto; margin-top: 15px;">Waiting for ID...</pre>
+    </div>
+
+    <div class="card">
+        <h2>Search</h2>
+        <form onsubmit="searchFiles(event)" style="display: flex; gap: 10px;">
+            <input type="text" id="query" required placeholder="Type a word to search..." style="flex: 1;">
+            <button type="submit">Search</button>
+        </form>
+        <ul id="search-results" style="margin-top: 15px; list-style-type: none; padding: 0;"></ul>
+    </div>
+
+    <script>
+        async function startCrawl(e) {
+            e.preventDefault();
+            const origin = document.getElementById('origin').value;
+            const depth = document.getElementById('depth').value;
+            const hit_rate = document.getElementById('hit_rate').value || 0;
+            const queue_capacity = document.getElementById('queue_capacity').value || 0;
+            const max_urls = document.getElementById('max_urls').value || 0;
             
-            <div style="border: 1px solid #ccc; padding: 15px; margin-bottom: 20px;">
-                <h3>1. Start New Crawler</h3>
-                <form onsubmit="startCrawl(event)">
-                    URL: <input type="text" id="origin" placeholder="https://example.com" required>
-                    Depth: <input type="number" id="depth" value="1" min="0" required>
-                    <button type="submit">Start Crawl</button>
-                </form>
-                <p id="crawl-msg"></p>
-            </div>
+            const res = await fetch('/api/crawl', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: `origin=${encodeURIComponent(origin)}&depth=${depth}&hit_rate=${hit_rate}&queue_capacity=${queue_capacity}&max_urls=${max_urls}`
+            });
+            const data = await res.json();
+            document.getElementById('crawl-msg').innerText = "Started! ID: " + data.crawler_id;
+            document.getElementById('crawlerId').value = data.crawler_id;
+            pollStatus(); 
+        }
 
-            <div style="border: 1px solid #ccc; padding: 15px; margin-bottom: 20px;">
-                <h3>2. Crawler Status (Long Polling Simulation)</h3>
-                <input type="text" id="crawlerId" placeholder="Crawler ID">
-                <button onclick="pollStatus()">Check Status</button>
-                <pre id="status-log" style="background: #f4f4f4; padding: 10px;"></pre>
-            </div>
-
-            <div style="border: 1px solid #ccc; padding: 15px;">
-                <h3>3. Search Filesystem</h3>
-                <form onsubmit="searchFiles(event)">
-                    Query: <input type="text" id="query" required>
-                    <button type="submit">Search</button>
-                </form>
-                <ul id="search-results"></ul>
-            </div>
-
-            <script>
-                async function startCrawl(e) {
-                    e.preventDefault();
-                    const origin = document.getElementById('origin').value;
-                    const depth = document.getElementById('depth').value;
-                    const res = await fetch('/api/crawl', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                        body: `origin=${encodeURIComponent(origin)}&depth=${depth}`
-                    });
-                    const data = await res.json();
-                    document.getElementById('crawl-msg').innerText = "Started! ID: " + data.crawler_id;
-                    document.getElementById('crawlerId').value = data.crawler_id;
+        async function pollStatus() {
+            const id = document.getElementById('crawlerId').value;
+            if(!id) return;
+            const res = await fetch('/api/status?id=' + id);
+            const data = await res.json();
+            if(data.error) {
+                document.getElementById('status-log').innerText = data.error;
+            } else {
+                document.getElementById('status-log').innerText = 
+                    "Status: " + data.status.toUpperCase() + "\n\nLogs:\n" + data.logs.join('\n');
+                
+                if(data.status === 'running') {
+                    setTimeout(pollStatus, 2000); // Auto-poll
                 }
+            }
+        }
 
-                async function pollStatus() {
-                    const id = document.getElementById('crawlerId').value;
-                    if(!id) return;
-                    const res = await fetch('/api/status?id=' + id);
-                    const data = await res.json();
-                    if(data.error) {
-                        document.getElementById('status-log').innerText = data.error;
-                    } else {
-                        document.getElementById('status-log').innerText = 
-                            "Status: " + data.status + "\\n\\nLogs:\\n" + data.logs.join('\\n');
-                    }
-                }
-
-                async function searchFiles(e) {
-                    e.preventDefault();
-                    const q = document.getElementById('query').value;
-                    const res = await fetch('/api/search?q=' + encodeURIComponent(q));
-                    const data = await res.json();
-                    const ul = document.getElementById('search-results');
-                    ul.innerHTML = '';
-                    if(data.length === 0) ul.innerHTML = '<li>No results found on disk.</li>';
-                    data.forEach(item => {
-                        ul.innerHTML += `<li><b>${item.url}</b> (Origin: ${item.origin}, Depth: ${item.depth}, Freq: ${item.frequency})</li>`;
-                    });
-                }
-            </script>
-        </body>
-        </html>
+        async function searchFiles(e) {
+            e.preventDefault();
+            const q = document.getElementById('query').value;
+            const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+            const data = await res.json();
+            const ul = document.getElementById('search-results');
+            ul.innerHTML = '';
+            if(data.length === 0) ul.innerHTML = '<li style="padding: 10px; background: #fee2e2; border-radius: 4px;">No results found on disk.</li>';
+            data.forEach(item => {
+                ul.innerHTML += `<li style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <a href="${item.url}" target="_blank" style="color: #3b82f6; font-weight: bold; text-decoration: none;">${item.url}</a><br>
+                    <small style="color: #666;">Origin: ${item.origin} | Depth: ${item.depth} | Frequency: ${item.frequency}</small>
+                </li>`;
+            });
+        }
+    </script>
+</body>
+</html>
