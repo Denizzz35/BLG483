@@ -9,6 +9,7 @@ import os
 import time
 import string
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import random
 
 # --- File System Setup & Locks ---
 STORAGE_DIR = "data/storage"
@@ -91,7 +92,8 @@ class CrawlerThread(threading.Thread):
 
             # --- Rate Limiting (Hit Rate) ---
             if self.hit_rate > 0:
-                time_to_wait = 1.0 / self.hit_rate
+                base_wait = 1.0 / self.hit_rate
+                time_to_wait = random.uniform(base_wait * 0.7, base_wait * 1.5)
                 elapsed = time.time() - last_request_time
                 if elapsed < time_to_wait:
                     time.sleep(time_to_wait - elapsed)
