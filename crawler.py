@@ -53,12 +53,13 @@ class PageParser(HTMLParser):
 
 # --- Core Crawler Job ---
 class CrawlerThread(threading.Thread):
-    def __init__(self, origin, max_depth, hit_rate, queue_capacity):
+    def __init__(self, origin, max_depth, hit_rate, queue_capacity, max_urls):
         super().__init__()
         self.origin = origin
         self.max_depth = max_depth
         self.hit_rate = hit_rate
         self.queue_capacity = queue_capacity
+        self.max_urls = max_urls
         
         self.crawler_id = None
         self.started_event = threading.Event()
