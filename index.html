@@ -15,7 +15,10 @@
     </style>
 </head>
 <body>
-
+    <div style="display: flex; justify-content: space-between; align-items: center; max-width: 800px; margin: 0 auto 20px auto;">
+        <h1 style="margin: 0;">Web Crawler Dashboard</h1>
+        <button onclick="clearData()" style="background: #ef4444; color: white; padding: 10px 15px; border-radius: 4px; border: none; font-weight: bold; cursor: pointer;">🗑️ Clear Data</button>
+    </div>
     <div class="card">
         <h2>Create New Crawler</h2>
         <form onsubmit="startCrawl(event)">
@@ -118,6 +121,20 @@
                 </li>`;
             });
         }
+
+        async function clearData() {
+            if(!confirm("Are you sure you want to delete all crawled data? This cannot be undone.")) return;
+            
+            const res = await fetch('/api/clear', { method: 'POST' });
+            const data = await res.json();
+            alert(data.message);
+            
+            document.getElementById('status-log').innerText = "Waiting for ID...";
+            document.getElementById('search-results').innerHTML = '';
+            document.getElementById('crawlerId').value = '';
+            document.getElementById('crawl-msg').innerText = '';
+        }
+
     </script>
 </body>
 </html>

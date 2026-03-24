@@ -212,6 +212,19 @@ class RequestHandler(BaseHTTPRequestHandler):
             
             self.send_json({"message": "Job started", "crawler_id": worker.crawler_id})
 
+        elif self.path == '/api/clear':
+            with file_locks['visited']:
+                for f in os.listdir(STORAGE_DIR):
+                    if f.endswith('.data'):
+                        os.remove(os.path.join(STORAGE_DIR, f))
+
+                for f in os.listdir(JOBS_DIR):
+                    if f.endswith('.data'):
+                        os.remove(os.path.join(JOBS_DIR, f))
+
+                open(VISITED_FILE, 'w').close()
+            self.send_json({"message": "All database files cleared successfully!"})
+            
     def perform_search(self, query):
         words = re.findall(r'[a-z]+', query)
         if not words: return []
