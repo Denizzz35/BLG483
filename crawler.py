@@ -11,9 +11,9 @@ import string
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # --- File System Setup & Locks ---
-STORAGE_DIR = "storage"
-JOBS_DIR = "jobs"
-VISITED_FILE = "visited_urls.data"
+STORAGE_DIR = "data/storage"
+JOBS_DIR = "data/jobs"
+VISITED_FILE = "data/visited_urls.data"
 
 for d in [STORAGE_DIR, JOBS_DIR]:
     if not os.path.exists(d):
