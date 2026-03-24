@@ -109,7 +109,7 @@
         async function searchFiles(e) {
             e.preventDefault();
             const q = document.getElementById('query').value;
-            const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+            const res = await fetch('/search?query=' + encodeURIComponent(q));
             const data = await res.json();
             const ul = document.getElementById('search-results');
             ul.innerHTML = '';
@@ -117,7 +117,7 @@
             data.forEach(item => {
                 ul.innerHTML += `<li style="padding: 10px; border-bottom: 1px solid #eee;">
                     <a href="${item.url}" target="_blank" style="color: #3b82f6; font-weight: bold; text-decoration: none;">${item.url}</a><br>
-                    <small style="color: #666;">Origin: ${item.origin} | Depth: ${item.depth} | Frequency: ${item.frequency}</small>
+                    <small style="color: #666;">Origin: ${item.origin} | Depth: ${item.depth} | Frequency: ${item.frequency} | <b>Score: ${item.relevance_score}</b></small>
                 </li>`;
             });
         }

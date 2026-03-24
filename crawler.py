@@ -11,7 +11,6 @@ import string
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import random
 
-# --- File System Setup & Locks ---
 STORAGE_DIR = "data/storage"
 JOBS_DIR = "data/jobs"
 VISITED_FILE = "data/visited_urls.data"
@@ -22,11 +21,9 @@ for d in [STORAGE_DIR, JOBS_DIR]:
 if not os.path.exists(VISITED_FILE):
     open(VISITED_FILE, 'w').close()
 
-# Locks to prevent data corruption when multiple threads write to the same file
 file_locks = {char: threading.Lock() for char in string.ascii_lowercase}
 file_locks['visited'] = threading.Lock()
 
-# --- Native HTML Parser ---
 class PageParser(HTMLParser):
     def __init__(self, base_url):
         super().__init__()
@@ -52,7 +49,6 @@ class PageParser(HTMLParser):
         words = re.findall(r'[a-z]+', text.lower())
         return Counter(words)
 
-# --- Core Crawler Job ---
 class CrawlerThread(threading.Thread):
     def __init__(self, origin, max_depth, hit_rate, queue_capacity, max_urls):
         super().__init__()
@@ -66,9 +62,8 @@ class CrawlerThread(threading.Thread):
         self.started_event = threading.Event()
 
     def run(self):
-        # 1. Define Crawler ID exact format: [EpochTimeCreated_ThreadID]
         self.crawler_id = f"{int(time.time())}_{self.ident}"
-        self.started_event.set() # Unblock the web server to return the ID to the UI
+        self.started_event.set()
 
         job_file = os.path.join(JOBS_DIR, f"{self.crawler_id}.data")
         
@@ -90,7 +85,6 @@ class CrawlerThread(threading.Thread):
             current_url, origin_url, depth = queue.pop(0)
             log_status("running", logs, queue)
 
-            # --- Rate Limiting (Hit Rate) ---
             if self.hit_rate > 0:
                 base_wait = 1.0 / self.hit_rate
                 time_to_wait = random.uniform(base_wait * 0.7, base_wait * 1.5)
@@ -99,7 +93,6 @@ class CrawlerThread(threading.Thread):
                     time.sleep(time_to_wait - elapsed)
             last_request_time = time.time()
 
-            # --- Visited URLs Check ---
             with file_locks['visited']:
                 with open(VISITED_FILE, 'r') as f:
                     visited = set(f.read().splitlines())
@@ -111,7 +104,6 @@ class CrawlerThread(threading.Thread):
                     f.write(current_url + "\n")
                 visited.add(current_url)
 
-            # --- Fetch HTML ---
             try:
                 req = urllib.request.Request(current_url, headers={'User-Agent': 'BrightwaveCrawler/1.0'})
                 with urllib.request.urlopen(req, timeout=5) as response:
@@ -122,12 +114,10 @@ class CrawlerThread(threading.Thread):
                 logs.append(f"Error fetching {current_url}: {str(e)}")
                 continue
 
-            # --- Parse & Count Words ---
             parser = PageParser(current_url)
             parser.feed(html)
             word_freqs = parser.get_word_frequencies()
 
-            # --- Save to [letter].data ---
             for word, count in word_freqs.items():
                 first_letter = word[0]
                 if first_letter not in file_locks:
@@ -160,11 +150,9 @@ class CrawlerThread(threading.Thread):
 
             logs.append(f"Indexed {current_url} (Depth {depth})")
 
-            # --- Queue Management & Backpressure ---
             if depth < self.max_depth:
                 for link in parser.links:
                     if link not in visited:
-                        # Queue Capacity Logic: Skip adding if we hit our limit
                         if self.queue_capacity > 0 and len(queue) >= self.queue_capacity:
                             logs.append("Queue capacity reached. Pausing link ingestion for this page.")
                             break 
@@ -173,7 +161,6 @@ class CrawlerThread(threading.Thread):
         logs.append(f"Job {self.crawler_id} completed.")
         log_status("completed", logs, [])
 
-# --- Web Server & API ---
 class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/':
@@ -187,8 +174,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.send_json(json.load(f))
             else:
                 self.send_json({"error": "Job not found"})
-        elif self.path.startswith('/api/search'):
-            query = parse_qs(self.path.split('?')[1]).get('q', [''])[0].lower()
+        elif self.path.startswith('/search'):
+            query = parse_qs(self.path.split('?')[1]).get('query', [''])[0].lower()
             results = self.perform_search(query)
             self.send_json(results)
         else:
@@ -205,10 +192,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             hit_rate = float(params.get('hit_rate', ['0'])[0])
             queue_capacity = int(params.get('queue_capacity', ['0'])[0])
             max_urls = int(params.get('max_urls', ['0'])[0])            
-            # Start the crawler thread and wait for it to assign its own ID
             worker = CrawlerThread(origin, depth, hit_rate, queue_capacity, max_urls)
             worker.start()
-            worker.started_event.wait() # Pauses just long enough for the ID to generate
+            worker.started_event.wait() 
             
             self.send_json({"message": "Job started", "crawler_id": worker.crawler_id})
 
@@ -225,22 +211,34 @@ class RequestHandler(BaseHTTPRequestHandler):
                 open(VISITED_FILE, 'w').close()
             self.send_json({"message": "All database files cleared successfully!"})
             
-    def perform_search(self, query):
-        words = re.findall(r'[a-z]+', query)
-        if not words: return []
-        
-        all_results = []
-        for word in words:
-            letter = word[0]
-            letter_file = os.path.join(STORAGE_DIR, f"{letter}.data")
-            if os.path.exists(letter_file):
-                with open(letter_file, 'r') as f:
-                    data = json.load(f)
-                    if word in data:
-                        all_results.extend(data[word])
-        
-        # Sort by highest frequency
-        all_results.sort(key=lambda x: x['frequency'], reverse=True)
+    def perform_search(self, query): 
+        words = re.findall(r'[a-z]+', query.lower()) 
+        if not words: return [] 
+         
+        all_results = [] 
+        for word in words: 
+            letter = word[0] 
+            letter_file = os.path.join(STORAGE_DIR, f"{letter}.data") 
+            if os.path.exists(letter_file): 
+                with open(letter_file, 'r') as f: 
+                    data = json.load(f) 
+                    
+                    if word in data: 
+                        for entry in data[word]: 
+                            freq = entry['frequency'] 
+                            depth = entry['depth'] 
+
+                            score = (freq * 10) + 1000 - (depth * 5) 
+
+                            all_results.append({ 
+                                "url": entry['url'], 
+                                "origin": entry['origin'], 
+                                "depth": depth, 
+                                "frequency": freq, 
+                                "relevance_score": score 
+                            }) 
+                         
+        all_results.sort(key=lambda x: x['relevance_score'], reverse=True) 
         return all_results
 
     def send_html(self, content):
@@ -260,8 +258,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             return f.read()
 
 if __name__ == '__main__':
-    server = HTTPServer(('localhost', 8000), RequestHandler)
-    print("Serving Web App and API on http://localhost:8000")
+    server = HTTPServer(('localhost', 3600), RequestHandler)
+    print("Serving Web App and API on http://localhost:3600")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
