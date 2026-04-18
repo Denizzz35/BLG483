@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Crawler Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div style="max-width: 800px; margin: 0 auto 20px auto;">
+        <h1>Web Crawler & Search Engine</h1>
+    </div>
+
+    <div class="card">
+        <h2>System Status</h2>
+        <div class="row">
+            <div class="col">
+                <p>Crawling Active: <b id="crawling"></b></p>
+                <p>Queue Depth: <b id="queue"></b></p>
+            </div>
+            <div class="col">
+                <p>Active Workers: <b id="workers"></b></p>
+                <p>Pages Indexed: <b id="indexed"></b></p>
+            </div>
+            <div class="col">
+                <p>Backpressure: <b id="bp"></b></p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Start Indexing</h2>
+        <div class="row">
+            <div class="col" style="flex: 2;">
+                <label>Origin URL</label>
+                <input type="text" id="origin" value="https://news.ycombinator.com/">
+            </div>
+            <div class="col">
+                <label>Depth (k)</label>
+                <input type="number" id="depth" value="2">
+            </div>
+        </div>
+        <button onclick="startIndex()">Start Crawler</button>
+    </div>
+
+    <div class="card">
+        <h2>Search</h2>
+        <div class="row" style="align-items: flex-end;">
+            <div class="col" style="flex: 2;">
+                <label>Query</label>
+                <input type="text" id="query" placeholder="Type a word to search...">
+            </div>
+            <div class="col" style="flex: 0;">
+                <button onclick="runSearch()">Search</button>
+            </div>
+        </div>
+        <ul id="results" style="list-style-type: none; padding: 0; margin-top: 15px;"></ul>
+    </div>
+
+    <script>
+        async function updateStatus() {
+            let res = await fetch('/status');
+            let data = await res.json();
+            document.getElementById('crawling').innerText = data.is_crawling;
+            document.getElementById('queue').innerText = data.queue_depth;
+            document.getElementById('workers').innerText = data.active_workers;
+            document.getElementById('indexed').innerText = data.total_indexed_pages;
+            
+            // Add a little color warning if backpressure is high
+            let bpElement = document.getElementById('bp');
+            bpElement.innerText = data.backpressure_status;
+            if (data.backpressure_status === "HIGH LOAD") {
+                bpElement.style.color = "red";
+            } else {
+                bpElement.style.color = "green";
+            }
+        }
+        setInterval(updateStatus, 1000);
+        updateStatus();
+
+        async function startIndex() {
+            let origin = document.getElementById('origin').value;
+            let k = parseInt(document.getElementById('depth').value);
+            await fetch('/index', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({origin: origin, k: k})
+            });
+            alert('Crawler started!');
+        }
+
+        async function runSearch() {
+            let query = document.getElementById('query').value;
+            let res = await fetch('/search?query=' + query);
+            let data = await res.json();
+            let ul = document.getElementById('results');
+            ul.innerHTML = '';
+            
+            if(data.length === 0) {
+                ul.innerHTML = '<li style="padding: 10px; background: #fee2e2; border-radius: 4px; color: #991b1b;">No results found.</li>';
+            }
+            
+            data.forEach(item => {
+                let li = document.createElement('li');
+                li.style.cssText = "padding: 10px; border-bottom: 1px solid #eee;";
+                li.innerHTML = `
+                    <a href="${item[0]}" target="_blank" style="color: #3b82f6; font-weight: bold; text-decoration: none;">${item[0]}</a><br>
+                    <small style="color: #666;">Origin: ${item[1]} | Depth: ${item[2]}</small>
+                `;
+                ul.appendChild(li);
+            });
+        }
+    </script>
+</body>
+</html>
